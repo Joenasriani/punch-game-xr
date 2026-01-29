@@ -7,90 +7,92 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        body { margin: 0; overflow: hidden; background: #1e1b4b; font-family: 'Segoe UI', sans-serif; }
         .title-font { font-family: 'Anton', sans-serif; letter-spacing: 0.1em; }
         
-        #ui-overlay { 
-            position: absolute; 
-            top: 0; left: 0; 
-            width: 100%; height: 100%; 
+        #main-ui { 
+            position: fixed; 
+            inset: 0;
             display: flex; flex-direction: column; 
             align-items: center; justify-content: center; 
-            background: linear-gradient(135deg, #4f46e5 0%, #1e1b4b 100%); 
-            z-index: 20; 
+            background: linear-gradient(to bottom, #4f46e5, #1e1b4b); 
+            z-index: 100; 
             color: white;
-            transition: opacity 0.5s; 
+            text-align: center;
+            padding: 20px;
+        }
+
+        #xr-container {
+            margin-top: 40px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        /* Custom styling to force the AR button to be huge and visible */
+        #xr-container button { 
+            background: #ffffff !important;
+            color: #4f46e5 !important;
+            padding: 20px 40px !important;
+            font-size: 1.5rem !important;
+            font-weight: 900 !important;
+            border-radius: 50px !important;
+            border: none !important;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5) !important;
+            cursor: pointer !important;
+            text-transform: uppercase !important;
+            display: block !important;
         }
 
         #ar-menu {
             position: fixed;
-            bottom: 20px;
+            bottom: 30px;
             left: 50%;
             transform: translateX(-50%);
             display: flex;
-            gap: 12px;
-            padding: 10px;
-            background: rgba(0,0,0,0.6);
-            backdrop-filter: blur(15px);
-            border-radius: 50px;
-            z-index: 100;
+            gap: 15px;
+            padding: 12px;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(10px);
+            border-radius: 60px;
+            z-index: 200;
             opacity: 0;
             pointer-events: none;
             transition: opacity 0.3s;
-            border: 1px solid rgba(255,255,255,0.1);
         }
         #ar-menu.active { opacity: 1; pointer-events: all; }
 
         .thumb { 
-            width: 60px; height: 60px; 
+            width: 65px; height: 65px; 
             border-radius: 50%; 
-            border: 2px solid white; 
-            cursor: pointer; 
-            transition: all 0.2s; 
+            border: 3px solid white; 
             object-fit: cover; 
+            cursor: pointer;
         }
-        .thumb:hover { transform: scale(1.1); }
-        .thumb.active { border-color: #ef4444; box-shadow: 0 0 15px #ef4444; }
-        
-        /* Force XR Button Visibility */
-        #xr-button-container {
-            min-height: 80px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
+        .thumb.active { border-color: #ef4444; box-shadow: 0 0 20px #ef4444; }
 
-        #xr-button-container button { 
-            padding: 1.25rem 2.5rem !important; 
-            font-size: 1.1rem !important;
-            font-weight: 900 !important; 
-            border-radius: 9999px !important; 
-            background: #ffffff !important; 
-            color: #4f46e5 !important; 
-            border: none !important; 
-            cursor: pointer; 
-            box-shadow: 0 15px 35px rgba(0,0,0,0.4);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            transition: transform 0.2s;
+        #error-msg {
+            margin-top: 20px;
+            color: #fca5a5;
+            font-size: 0.8rem;
+            max-width: 250px;
         }
-        #xr-button-container button:active { transform: scale(0.95); }
     </style>
 </head>
 <body>
 
-    <div id="ui-overlay">
-        <div class="text-center mb-12">
-            <h1 class="text-6xl md:text-8xl font-black text-white uppercase title-font">STRESS BUSTER</h1>
-            <p class="text-indigo-200 text-sm font-bold uppercase tracking-[0.4em] mt-4">Physical Punching Sim</p>
+    <div id="main-ui">
+        <h1 class="text-6xl font-black uppercase title-font mb-2">STRESS BUSTER</h1>
+        <p class="text-indigo-200 font-bold tracking-[0.3em] text-xs uppercase mb-10">Punching Reality</p>
+        
+        <div id="xr-container">
+            <!-- The ARButton will be injected here -->
         </div>
 
-        <div id="xr-button-container"></div>
-        
-        <div class="mt-8 max-w-xs text-center text-indigo-100 text-xs opacity-70 leading-relaxed">
-            Please click the button above to start your camera and enter AR. 
-            <br><br>
-            Note: Requires HTTPS and a WebXR-compatible browser (Chrome on Android or Quest).
+        <div id="error-msg">
+            Note: If you don't see a "START AR" button, ensure you are on a mobile browser (Chrome/Android) with HTTPS.
         </div>
     </div>
 
@@ -105,6 +107,161 @@
             { name: "ELON", url: "https://upload.wikimedia.org/wikipedia/commons/3/34/Elon_Musk_Royal_Society_%28crop2%29.jpg" },
             { name: "ZUCK", url: "https://upload.wikimedia.org/wikipedia/commons/1/18/Mark_Zuckerberg_F8_2019_Keynote_%2831119002762%29_%28cropped%29.jpg" }
         ];
+
+        let currentTargetUrl = PEOPLE[0].url;
+        let scene, camera, renderer, targetGroup, targetMesh, hand0, hand1;
+        let particles = [];
+        let audioCtx;
+        let lastPunchTime = 0;
+
+        const mainUI = document.getElementById('main-ui');
+        const arMenu = document.getElementById('ar-menu');
+
+        // Setup the AR switch menu
+        PEOPLE.forEach((p, i) => {
+            const img = document.createElement('img');
+            img.src = p.url;
+            img.className = `thumb ${i === 0 ? 'active' : ''}`;
+            img.onclick = () => {
+                document.querySelectorAll('.thumb').forEach(t => t.classList.remove('active'));
+                img.classList.add('active');
+                currentTargetUrl = p.url;
+                updateTargetTexture(p.url);
+            };
+            arMenu.appendChild(img);
+        });
+
+        function playPunchSFX() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const now = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.frequency.setValueAtTime(140, now);
+            osc.frequency.exponentialRampToValueAtTime(40, now + 0.1);
+            gain.gain.setValueAtTime(0.6, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(now + 0.15);
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // Create and append the button
+            const arBtn = ARButton.createButton(renderer, { 
+                requiredFeatures: ['hand-tracking'],
+                optionalFeatures: ['dom-overlay'],
+                domOverlay: { root: document.body }
+            });
+            document.getElementById('xr-container').appendChild(arBtn);
+
+            scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 2));
+
+            targetGroup = new THREE.Group();
+            const geometry = new THREE.CircleGeometry(0.18, 32);
+            const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, transparent: true });
+            targetMesh = new THREE.Mesh(geometry, material);
+            targetGroup.add(targetMesh);
+            targetGroup.position.set(0, 1.4, -0.6); 
+            scene.add(targetGroup);
+
+            updateTargetTexture(currentTargetUrl);
+
+            hand0 = renderer.xr.getHand(0);
+            hand1 = renderer.xr.getHand(1);
+            scene.add(hand0);
+            scene.add(hand1);
+
+            renderer.setAnimationLoop(render);
+        }
+
+        function updateTargetTexture(url) {
+            new THREE.TextureLoader().load(url, (tex) => {
+                targetMesh.material.map = tex;
+                targetMesh.material.needsUpdate = true;
+            });
+        }
+
+        function spawnBlood(pos) {
+            for (let i = 0; i < 15; i++) {
+                const p = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.007),
+                    new THREE.MeshBasicMaterial({ color: 0xaa0000 })
+                );
+                p.position.copy(pos);
+                p.userData = {
+                    vel: new THREE.Vector3((Math.random()-0.5)*0.08, Math.random()*0.08, (Math.random()-0.5)*0.08),
+                    life: 1.0
+                };
+                scene.add(p);
+                particles.push(p);
+            }
+        }
+
+        function checkImpact(hand) {
+            if (!hand || !hand.visible) return;
+            const joint = hand.joints['index-finger-tip'] || hand.joints['middle-finger-tip'];
+            if (!joint) return;
+
+            const distance = joint.position.distanceTo(targetGroup.position);
+            const now = Date.now();
+
+            if (distance < 0.12 && now - lastPunchTime > 250) {
+                lastPunchTime = now;
+                playPunchSFX();
+                spawnBlood(targetGroup.position);
+                targetGroup.scale.set(1.3, 1.3, 1.3);
+                setTimeout(() => targetGroup.scale.set(1, 1, 1), 80);
+            }
+        }
+
+        function render() {
+            if (renderer.xr.isPresenting) {
+                mainUI.style.display = 'none';
+                arMenu.classList.add('active');
+                targetGroup.lookAt(camera.position); 
+            } else {
+                mainUI.style.display = 'flex';
+                arMenu.classList.remove('active');
+            }
+
+            checkImpact(hand0);
+            checkImpact(hand1);
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.position.add(p.userData.vel);
+                p.userData.vel.y -= 0.0025; 
+                p.userData.life -= 0.025;
+                p.scale.setScalar(p.userData.life);
+                if (p.userData.life <= 0) {
+                    scene.remove(p);
+                    particles.splice(i, 1);
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        init();
+    </script>
+</body>
+</html>
 
         let currentTargetUrl = PEOPLE[0].url;
         let scene, camera, renderer, targetGroup, targetMesh, hand0, hand1;
