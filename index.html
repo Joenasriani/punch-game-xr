@@ -13,10 +13,37 @@
         .thumb { width: 90px; height: 90px; border-radius: 50%; border: 4px solid #6366f1; cursor: pointer; transition: all 0.2s; object-fit: cover; }
         .thumb:hover { transform: scale(1.1); border-color: #4f46e5; }
         .thumb.active { border-color: #ef4444; box-shadow: 0 0 20px rgba(239, 68, 68, 0.4); }
+        
+        #auto-open-prompt {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-150%);
+            background: #4f46e5;
+            color: white;
+            padding: 14px 28px;
+            border-radius: 50px;
+            font-weight: bold;
+            box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4);
+            z-index: 100;
+            transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        #auto-open-prompt.show { transform: translateX(-50%) translateY(0); }
+        
         #xr-button-container button { padding: 1rem 2rem !important; font-weight: bold !important; border-radius: 9999px !important; background: #4f46e5 !important; color: white !important; border: none !important; cursor: pointer; }
     </style>
 </head>
 <body>
+
+    <div id="auto-open-prompt">
+        <span>Ready to Punch? Open AR Camera</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+    </div>
 
     <div id="ui-overlay">
         <div class="text-center mb-8">
@@ -31,7 +58,7 @@
         <div id="xr-button-container" class="mb-6"></div>
         
         <div class="max-w-xs text-center text-gray-500 text-xs leading-relaxed">
-            Choose your target and enter AR. Use your actual fists to punch the floating image. Requires a WebXR compatible device or Meta Quest.
+            Select a target above. Use your actual fists to punch the floating image in your room.
         </div>
     </div>
 
@@ -53,8 +80,8 @@
 
         const overlay = document.getElementById('ui-overlay');
         const targetSelector = document.getElementById('target-selector');
+        const autoPrompt = document.getElementById('auto-open-prompt');
 
-        // Populate Selection UI
         PEOPLE.forEach((p, i) => {
             const img = document.createElement('img');
             img.src = p.url;
@@ -68,13 +95,19 @@
             targetSelector.appendChild(img);
         });
 
+        autoPrompt.onclick = () => {
+            const xrButton = document.querySelector('#xr-button-container button');
+            if (xrButton) xrButton.click();
+            autoPrompt.classList.remove('show');
+        };
+
         function playPunchSFX() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const now = audioCtx.currentTime;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.frequency.setValueAtTime(140, now);
-            osc.frequency.exponentialRampToValueAtTime(40, now + 0.12);
+            osc.frequency.exponentialRampToValueAtTime(40, now + 0.1);
             gain.gain.setValueAtTime(0.6, now);
             gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
             osc.connect(gain);
@@ -106,6 +139,112 @@
             const geometry = new THREE.CircleGeometry(0.18, 32);
             const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
             targetMesh = new THREE.Mesh(geometry, material);
+            targetGroup.add(targetMesh);
+            targetGroup.position.set(0, 1.4, -0.6); 
+            scene.add(targetGroup);
+
+            updateTargetTexture(currentTargetUrl);
+
+            hand0 = renderer.xr.getHand(0);
+            hand1 = renderer.xr.getHand(1);
+            scene.add(hand0);
+            scene.add(hand1);
+
+            const handMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.3 });
+            [hand0, hand1].forEach(h => {
+                const dot = new THREE.Mesh(new THREE.SphereGeometry(0.02), handMat);
+                h.add(dot);
+            });
+
+            renderer.setAnimationLoop(render);
+
+            // Trigger notification immediately on start
+            setTimeout(() => {
+                autoPrompt.classList.add('show');
+            }, 1000);
+        }
+
+        function updateTargetTexture(url) {
+            new THREE.TextureLoader().load(url, (tex) => {
+                targetMesh.material.map = tex;
+                targetMesh.material.needsUpdate = true;
+            });
+        }
+
+        function spawnBlood(pos) {
+            for (let i = 0; i < 15; i++) {
+                const p = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.007),
+                    new THREE.MeshBasicMaterial({ color: 0xaa0000 })
+                );
+                p.position.copy(pos);
+                p.userData = {
+                    vel: new THREE.Vector3((Math.random()-0.5)*0.07, Math.random()*0.07, (Math.random()-0.5)*0.07),
+                    life: 1.0
+                };
+                scene.add(p);
+                particles.push(p);
+            }
+        }
+
+        function checkImpact(hand) {
+            if (!hand.visible) return;
+            const joint = hand.joints['index-finger-tip'] || hand.joints['middle-finger-tip'];
+            if (!joint) return;
+
+            const distance = joint.position.distanceTo(targetGroup.position);
+            const now = Date.now();
+
+            if (distance < 0.12 && now - lastPunchTime > 250) {
+                lastPunchTime = now;
+                playPunchSFX();
+                spawnBlood(targetGroup.position);
+                
+                targetGroup.scale.set(1.3, 1.3, 1.3);
+                setTimeout(() => targetGroup.scale.set(1, 1, 1), 80);
+            }
+        }
+
+        function render() {
+            if (renderer.xr.isPresenting) {
+                overlay.style.opacity = '0';
+                overlay.style.pointerEvents = 'none';
+                autoPrompt.classList.remove('show');
+                targetGroup.lookAt(camera.position); 
+            } else {
+                overlay.style.opacity = '1';
+                overlay.style.pointerEvents = 'all';
+            }
+
+            checkImpact(hand0);
+            checkImpact(hand1);
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.position.add(p.userData.vel);
+                p.userData.vel.y -= 0.0025; 
+                p.userData.life -= 0.025;
+                p.scale.setScalar(p.userData.life);
+                if (p.userData.life <= 0) {
+                    scene.remove(p);
+                    particles.splice(i, 1);
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        window.onload = init;
+    </script>
+</body>
+</html>
+
             targetGroup.add(targetMesh);
             targetGroup.position.set(0, 1.4, -0.6); 
             scene.add(targetGroup);
